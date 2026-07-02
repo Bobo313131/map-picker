@@ -41,8 +41,6 @@
     }
     #confirm-btn:disabled { background: #3a3a3c; color: #6e6e73; cursor: not-allowed; }
     #confirm-btn:not(:disabled):active { transform: scale(0.97); }
-    .spinner { display: inline-block; animation: spin 0.8s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -64,29 +62,23 @@
   tg.ready();
   tg.expand();
 
-  const APIKEY = '98e9a644-14da-48f9-b740-a886e0b4fa82';
   let placemark = null;
   let selectedData = null;
 
-  // Яндекс HTTP Геокодер (обратное геокодирование) — надёжнее ymaps.geocode()
+  // Nominatim (OpenStreetMap) — работает из браузера без API-ключа и без CORS-проблем
   async function reverseGeocode(lat, lon) {
-    const url = `https://geocode-maps.yandex.ru/1.x/?apikey=${APIKEY}&geocode=${lon},${lat}&format=json&results=1&lang=ru_RU`;
     try {
-      const resp = await fetch(url);
+      const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&accept-language=ru&zoom=18`;
+      const resp = await fetch(url, {
+        headers: { 'User-Agent': 'TelegramRentBot/1.0' }
+      });
       if (!resp.ok) return null;
-      const json = await resp.json();
-      const members = json.response.GeoObjectCollection.featureMember;
-      if (!members.length) return null;
-      const obj = members[0].GeoObject;
-      const components = obj.metaDataProperty.GeocoderMetaData.Address.Components;
-      let city = '', street = '', house = '';
-      for (const c of components) {
-        if (c.kind === 'locality') city = c.name;
-        else if (c.kind === 'area' && !city) city = c.name;
-        else if (c.kind === 'street') street = c.name;
-        else if (c.kind === 'house') house = c.name;
-      }
-      const address = [street, house].filter(Boolean).join(', ') || obj.name || '';
+      const data = await resp.json();
+      const a = data.address || {};
+      const city    = a.city || a.town || a.village || a.suburb || '';
+      const road    = a.road || a.pedestrian || a.footway || '';
+      const house   = a.house_number || '';
+      const address = [road, house].filter(Boolean).join(', ');
       return { city, address };
     } catch (e) {
       return null;
@@ -130,12 +122,11 @@
       }
 
       const lat = coords[0], lon = coords[1];
-
-      // Показываем спиннер пока ищем адрес
       selectedData = { lat, lon, city: '', address: '' };
+
       const addrEl = document.getElementById('address-text');
       addrEl.className = 'placeholder';
-      addrEl.innerHTML = '<span class="spinner">⏳</span> Определяю адрес...';
+      addrEl.textContent = '⏳ Определяю адрес...';
       document.getElementById('confirm-btn').disabled = true;
 
       const result = await reverseGeocode(lat, lon);
@@ -147,9 +138,9 @@
         addrEl.className = '';
         addrEl.textContent = display;
       } else {
-        // Геокодинг не удался — бот сделает это сам на сервере
+        // Геокодинг не удался — бот определит адрес сам на сервере
         addrEl.className = 'placeholder';
-        addrEl.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)} (адрес уточнится автоматически)`;
+        addrEl.textContent = 'Адрес будет определён автоматически';
       }
 
       document.getElementById('confirm-btn').disabled = false;
