@@ -31,7 +31,8 @@
       min-height: 52px; display: flex; align-items: center; gap: 10px;
     }
     #address-icon { font-size: 20px; flex-shrink: 0; }
-    #address-text { font-size: 14px; line-height: 1.4; color: #6e6e73; }
+    #address-text { font-size: 14px; line-height: 1.4; }
+    #address-text.placeholder { color: #6e6e73; }
     #confirm-btn {
       width: 100%; padding: 14px;
       background: #FF5A00; color: #fff;
@@ -40,6 +41,8 @@
     }
     #confirm-btn:disabled { background: #3a3a3c; color: #6e6e73; cursor: not-allowed; }
     #confirm-btn:not(:disabled):active { transform: scale(0.97); }
+    .spinner { display: inline-block; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -50,9 +53,9 @@
 <div id="panel">
   <div id="address-box">
     <span id="address-icon">📍</span>
-    <span id="address-text">Нажмите на нужное место на карте</span>
+    <span id="address-text" class="placeholder">Нажмите на нужное место на карте</span>
   </div>
-  <button id="confirm-btn" disabled>Подтвердить место</button>
+  <button id="confirm-btn" disabled>Подтвердить адрес</button>
 </div>
 
 <script src="https://api-maps.yandex.ru/2.1/?apikey=98e9a644-14da-48f9-b740-a886e0b4fa82&lang=ru_RU"></script>
@@ -61,8 +64,34 @@
   tg.ready();
   tg.expand();
 
+  const APIKEY = '98e9a644-14da-48f9-b740-a886e0b4fa82';
   let placemark = null;
   let selectedData = null;
+
+  // Яндекс HTTP Геокодер (обратное геокодирование) — надёжнее ymaps.geocode()
+  async function reverseGeocode(lat, lon) {
+    const url = `https://geocode-maps.yandex.ru/1.x/?apikey=${APIKEY}&geocode=${lon},${lat}&format=json&results=1&lang=ru_RU`;
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) return null;
+      const json = await resp.json();
+      const members = json.response.GeoObjectCollection.featureMember;
+      if (!members.length) return null;
+      const obj = members[0].GeoObject;
+      const components = obj.metaDataProperty.GeocoderMetaData.Address.Components;
+      let city = '', street = '', house = '';
+      for (const c of components) {
+        if (c.kind === 'locality') city = c.name;
+        else if (c.kind === 'area' && !city) city = c.name;
+        else if (c.kind === 'street') street = c.name;
+        else if (c.kind === 'house') house = c.name;
+      }
+      const address = [street, house].filter(Boolean).join(', ') || obj.name || '';
+      return { city, address };
+    } catch (e) {
+      return null;
+    }
+  }
 
   ymaps.ready(function () {
     const map = new ymaps.Map('map', {
@@ -71,7 +100,6 @@
       controls: ['zoomControl', 'searchControl'],
     });
 
-    // Поиск по названию — при выборе результата ставим пин
     const search = map.controls.get('searchControl');
     search.events.add('resultselect', function () {
       search.getResult(0).then(function (res) {
@@ -81,12 +109,11 @@
       });
     });
 
-    // Клик по карте
     map.events.add('click', function (e) {
       setPin(e.get('coords'));
     });
 
-    function setPin(coords) {
+    async function setPin(coords) {
       document.getElementById('hint').classList.add('hidden');
 
       if (placemark) {
@@ -102,11 +129,29 @@
         map.geoObjects.add(placemark);
       }
 
-      selectedData = { lat: coords[0], lon: coords[1] };
+      const lat = coords[0], lon = coords[1];
 
-      document.getElementById('address-text').textContent =
-        'Место выбрано ✅ Нажмите «Подтвердить»';
-      document.getElementById('address-text').style.color = '#fff';
+      // Показываем спиннер пока ищем адрес
+      selectedData = { lat, lon, city: '', address: '' };
+      const addrEl = document.getElementById('address-text');
+      addrEl.className = 'placeholder';
+      addrEl.innerHTML = '<span class="spinner">⏳</span> Определяю адрес...';
+      document.getElementById('confirm-btn').disabled = true;
+
+      const result = await reverseGeocode(lat, lon);
+
+      if (result && (result.city || result.address)) {
+        selectedData.city    = result.city;
+        selectedData.address = result.address;
+        const display = [result.city, result.address].filter(Boolean).join(', ');
+        addrEl.className = '';
+        addrEl.textContent = display;
+      } else {
+        // Геокодинг не удался — бот сделает это сам на сервере
+        addrEl.className = 'placeholder';
+        addrEl.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)} (адрес уточнится автоматически)`;
+      }
+
       document.getElementById('confirm-btn').disabled = false;
     }
   });
