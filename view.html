@@ -128,25 +128,14 @@
     }
 
     props.forEach(function (p) {
-      const isHL = (p.i === highlightId);
-      const bg   = isHL ? '#E63C00' : '#1E64DC';
+      const isHL  = (p.i === highlightId);
       const price = p.p.toLocaleString('ru-RU') + ' ₽';
 
-      const Layout = ymaps.templateLayoutFactory.createClass(
-        '<div style="background:' + bg + ';color:#fff;font:600 13px/1 system-ui;' +
-        'padding:6px 11px;border-radius:10px;white-space:nowrap;cursor:pointer;' +
-        'box-shadow:0 2px 8px rgba(0,0,0,.4);position:relative;">' +
-        price +
-        '<div style="width:0;height:0;border-left:6px solid transparent;' +
-        'border-right:6px solid transparent;border-top:8px solid ' + bg + ';' +
-        'position:absolute;bottom:-8px;left:50%;margin-left:-6px;"></div>' +
-        '</div>'
+      const pm = new ymaps.Placemark(
+        [p.la, p.lo],
+        { iconContent: price },
+        { preset: isHL ? 'islands#orangeStretchyIcon' : 'islands#blueStretchyIcon' }
       );
-
-      const pm = new ymaps.Placemark([p.la, p.lo], {}, {
-        iconLayout: Layout,
-        iconShape: { type: 'Rectangle', coordinates: [[-55, -36], [55, 0]] },
-      });
 
       pm.events.add('click', function () {
         activePropId = p.i;
@@ -157,6 +146,7 @@
 
       map.geoObjects.add(pm);
     });
+
 
     map.events.add('click', closePanel);
   });
