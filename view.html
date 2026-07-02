@@ -13,6 +13,12 @@
       background: #1c1c1e;
     }
     #map { flex: 1; width: 100%; }
+    #debug {
+      position: fixed; top: 0; left: 0; right: 0;
+      background: #333; color: #fff; font-size: 11px;
+      padding: 6px 10px; z-index: 9999;
+      word-break: break-all; white-space: pre-wrap;
+    }
     #panel {
       position: fixed; bottom: 0; left: 0; right: 0;
       background: #1c1c1e; color: #fff;
@@ -24,12 +30,8 @@
       z-index: 200;
     }
     #panel.visible { transform: translateY(0); }
-    #panel-price {
-      font-size: 22px; font-weight: 700; margin-bottom: 4px;
-    }
-    #panel-addr {
-      font-size: 14px; color: #8e8e93; margin-bottom: 18px; line-height: 1.4;
-    }
+    #panel-price { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+    #panel-addr  { font-size: 14px; color: #8e8e93; margin-bottom: 18px; line-height: 1.4; }
     #panel-btn {
       width: 100%; padding: 15px;
       background: #FF5A00; color: #fff;
@@ -41,20 +43,13 @@
       position: absolute; top: 14px; right: 16px;
       background: #2c2c2e; border: none; color: #8e8e93;
       width: 30px; height: 30px; border-radius: 50%;
-      font-size: 14px; cursor: pointer; display: flex;
-      align-items: center; justify-content: center;
-    }
-    #count-badge {
-      position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
-      background: rgba(0,0,0,0.65); color: #fff;
-      padding: 6px 14px; border-radius: 16px; font-size: 13px;
-      z-index: 100; pointer-events: none;
+      font-size: 14px; cursor: pointer;
     }
   </style>
 </head>
 <body>
 
-<div id="count-badge">Загрузка…</div>
+<div id="debug">Загрузка…</div>
 <div id="map"></div>
 
 <div id="panel">
@@ -70,27 +65,48 @@
   tg.ready();
   tg.expand();
 
+  const dbg = document.getElementById('debug');
+
   let props = [], highlightId = null, activePropId = null;
 
+  // Показываем что получила страница
+  dbg.textContent =
+    'search: ' + (location.search || '(пусто)') + '\n' +
+    'hash: '   + (location.hash.slice(0, 80) || '(пусто)');
+
+  // Пробуем query-параметр ?d=
   try {
     const d = new URLSearchParams(location.search).get('d');
     if (d) {
-        const parsed = JSON.parse(d);
+      const parsed = JSON.parse(d);
+      props = parsed.props || [];
+      highlightId = parsed.highlight || null;
+      dbg.textContent = 'OK via ?d= | props: ' + props.length;
+    } else {
+      // Пробуем hash-фрагмент
+      const h = location.hash.slice(1);
+      if (h) {
+        const parsed = JSON.parse(decodeURIComponent(h));
         props = parsed.props || [];
         highlightId = parsed.highlight || null;
+        dbg.textContent = 'OK via hash | props: ' + props.length;
+      } else {
+        dbg.textContent = 'НЕТ ДАННЫХ\nsearch=' + location.search + '\nhash=' + location.hash;
+      }
     }
-} catch (e) {
-    document.getElementById('count-badge').textContent = 'Ошибка данных';
-}
+  } catch (e) {
+    dbg.textContent = 'Ошибка парсинга: ' + e.message + '\n' + location.search.slice(0, 100);
+  }
 
   ymaps.ready(function () {
     if (!props.length) {
-      document.getElementById('count-badge').textContent = 'Нет объектов';
+      dbg.style.background = '#900';
+      dbg.textContent += '\nymaps ready — props пуст!';
       return;
     }
 
-    document.getElementById('count-badge').textContent =
-      `${props.length} ${props.length === 1 ? 'объект' : props.length < 5 ? 'объекта' : 'объектов'}`;
+    // Успешно — скрываем отладку
+    dbg.style.display = 'none';
 
     const lats = props.map(p => p.la);
     const lons = props.map(p => p.lo);
@@ -104,11 +120,10 @@
     });
 
     if (props.length > 1) {
-      const margin = 60;
       map.setBounds(
         [[Math.min(...lats), Math.min(...lons)],
          [Math.max(...lats), Math.max(...lons)]],
-        { checkZoomRange: true, zoomMargin: margin }
+        { checkZoomRange: true, zoomMargin: 60 }
       );
     }
 
@@ -117,33 +132,21 @@
       const bg   = isHL ? '#E63C00' : '#1E64DC';
       const price = p.p.toLocaleString('ru-RU') + ' ₽';
 
-      const BubbleLayout = ymaps.templateLayoutFactory.createClass(
-        `<div class="bubble" data-id="${p.i}" style="
-            background:${bg};
-            color:#fff; font:600 13px/1 system-ui;
-            padding:6px 11px; border-radius:10px;
-            white-space:nowrap; cursor:pointer;
-            box-shadow:0 2px 8px rgba(0,0,0,0.4);
-            position:relative;
-          ">
-          ${price}
-          <div style="
-            width:0;height:0;
-            border-left:6px solid transparent;
-            border-right:6px solid transparent;
-            border-top:8px solid ${bg};
-            position:absolute;bottom:-8px;left:50%;margin-left:-6px;
-          "></div>
-        </div>`
+      const Layout = ymaps.templateLayoutFactory.createClass(
+        '<div style="background:' + bg + ';color:#fff;font:600 13px/1 system-ui;' +
+        'padding:6px 11px;border-radius:10px;white-space:nowrap;cursor:pointer;' +
+        'box-shadow:0 2px 8px rgba(0,0,0,.4);position:relative;">' +
+        price +
+        '<div style="width:0;height:0;border-left:6px solid transparent;' +
+        'border-right:6px solid transparent;border-top:8px solid ' + bg + ';' +
+        'position:absolute;bottom:-8px;left:50%;margin-left:-6px;"></div>' +
+        '</div>'
       );
 
-      const pm = new ymaps.Placemark(
-        [p.la, p.lo], {},
-        {
-          iconLayout: BubbleLayout,
-          iconShape: { type: 'Rectangle', coordinates: [[-55, -36], [55, 0]] },
-        }
-      );
+      const pm = new ymaps.Placemark([p.la, p.lo], {}, {
+        iconLayout: Layout,
+        iconShape: { type: 'Rectangle', coordinates: [[-55, -36], [55, 0]] },
+      });
 
       pm.events.add('click', function () {
         activePropId = p.i;
@@ -155,15 +158,11 @@
       map.geoObjects.add(pm);
     });
 
-    // Закрыть панель по клику на карту
-    map.events.add('click', function () { closePanel(); });
+    map.events.add('click', closePanel);
   });
 
-  function closePanel() {
-    document.getElementById('panel').classList.remove('visible');
-  }
-
-  function selectProp() {
+  function closePanel()  { document.getElementById('panel').classList.remove('visible'); }
+  function selectProp()  {
     if (activePropId === null) return;
     tg.sendData(JSON.stringify({ prop_id: activePropId }));
   }
