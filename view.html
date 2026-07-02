@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Карта объектов</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+      background: #1c1c1e;
+    }
+    #map { flex: 1; width: 100%; }
+    #panel {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: #1c1c1e; color: #fff;
+      padding: 20px 16px 28px;
+      border-radius: 20px 20px 0 0;
+      box-shadow: 0 -4px 24px rgba(0,0,0,0.4);
+      transform: translateY(110%);
+      transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
+      z-index: 200;
+    }
+    #panel.visible { transform: translateY(0); }
+    #panel-price {
+      font-size: 22px; font-weight: 700; margin-bottom: 4px;
+    }
+    #panel-addr {
+      font-size: 14px; color: #8e8e93; margin-bottom: 18px; line-height: 1.4;
+    }
+    #panel-btn {
+      width: 100%; padding: 15px;
+      background: #FF5A00; color: #fff;
+      border: none; border-radius: 14px;
+      font-size: 16px; font-weight: 600; cursor: pointer;
+    }
+    #panel-btn:active { transform: scale(0.97); }
+    #panel-close {
+      position: absolute; top: 14px; right: 16px;
+      background: #2c2c2e; border: none; color: #8e8e93;
+      width: 30px; height: 30px; border-radius: 50%;
+      font-size: 14px; cursor: pointer; display: flex;
+      align-items: center; justify-content: center;
+    }
+    #count-badge {
+      position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.65); color: #fff;
+      padding: 6px 14px; border-radius: 16px; font-size: 13px;
+      z-index: 100; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+<div id="count-badge">Загрузка…</div>
+<div id="map"></div>
+
+<div id="panel">
+  <button id="panel-close" onclick="closePanel()">✕</button>
+  <div id="panel-price"></div>
+  <div id="panel-addr"></div>
+  <button id="panel-btn" onclick="selectProp()">Смотреть объект →</button>
+</div>
+
+<script src="https://api-maps.yandex.ru/2.1/?apikey=98e9a644-14da-48f9-b740-a886e0b4fa82&lang=ru_RU"></script>
+<script>
+  const tg = window.Telegram.WebApp;
+  tg.ready();
+  tg.expand();
+
+  let props = [], highlightId = null, activePropId = null;
+
+  try {
+    const raw = decodeURIComponent(location.hash.slice(1));
+    const parsed = JSON.parse(raw);
+    props = parsed.props || [];
+    highlightId = parsed.highlight || null;
+  } catch (e) {
+    document.getElementById('count-badge').textContent = 'Ошибка данных';
+  }
+
+  ymaps.ready(function () {
+    if (!props.length) {
+      document.getElementById('count-badge').textContent = 'Нет объектов';
+      return;
+    }
+
+    document.getElementById('count-badge').textContent =
+      `${props.length} ${props.length === 1 ? 'объект' : props.length < 5 ? 'объекта' : 'объектов'}`;
+
+    const lats = props.map(p => p.la);
+    const lons = props.map(p => p.lo);
+    const cLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+    const cLon = (Math.min(...lons) + Math.max(...lons)) / 2;
+
+    const map = new ymaps.Map('map', {
+      center: [cLat, cLon],
+      zoom: 14,
+      controls: ['zoomControl'],
+    });
+
+    if (props.length > 1) {
+      const margin = 60;
+      map.setBounds(
+        [[Math.min(...lats), Math.min(...lons)],
+         [Math.max(...lats), Math.max(...lons)]],
+        { checkZoomRange: true, zoomMargin: margin }
+      );
+    }
+
+    props.forEach(function (p) {
+      const isHL = (p.i === highlightId);
+      const bg   = isHL ? '#E63C00' : '#1E64DC';
+      const price = p.p.toLocaleString('ru-RU') + ' ₽';
+
+      const BubbleLayout = ymaps.templateLayoutFactory.createClass(
+        `<div class="bubble" data-id="${p.i}" style="
+            background:${bg};
+            color:#fff; font:600 13px/1 system-ui;
+            padding:6px 11px; border-radius:10px;
+            white-space:nowrap; cursor:pointer;
+            box-shadow:0 2px 8px rgba(0,0,0,0.4);
+            position:relative;
+          ">
+          ${price}
+          <div style="
+            width:0;height:0;
+            border-left:6px solid transparent;
+            border-right:6px solid transparent;
+            border-top:8px solid ${bg};
+            position:absolute;bottom:-8px;left:50%;margin-left:-6px;
+          "></div>
+        </div>`
+      );
+
+      const pm = new ymaps.Placemark(
+        [p.la, p.lo], {},
+        {
+          iconLayout: BubbleLayout,
+          iconShape: { type: 'Rectangle', coordinates: [[-55, -36], [55, 0]] },
+        }
+      );
+
+      pm.events.add('click', function () {
+        activePropId = p.i;
+        document.getElementById('panel-price').textContent = price + '/сутки';
+        document.getElementById('panel-addr').textContent  = p.a || '📍 Адрес не указан';
+        document.getElementById('panel').classList.add('visible');
+      });
+
+      map.geoObjects.add(pm);
+    });
+
+    // Закрыть панель по клику на карту
+    map.events.add('click', function () { closePanel(); });
+  });
+
+  function closePanel() {
+    document.getElementById('panel').classList.remove('visible');
+  }
+
+  function selectProp() {
+    if (activePropId === null) return;
+    tg.sendData(JSON.stringify({ prop_id: activePropId }));
+  }
+</script>
+</body>
+</html>
