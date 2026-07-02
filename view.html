@@ -73,13 +73,15 @@
   let props = [], highlightId = null, activePropId = null;
 
   try {
-    const raw = decodeURIComponent(location.hash.slice(1));
-    const parsed = JSON.parse(raw);
-    props = parsed.props || [];
-    highlightId = parsed.highlight || null;
-  } catch (e) {
+    const d = new URLSearchParams(location.search).get('d');
+    if (d) {
+        const parsed = JSON.parse(d);
+        props = parsed.props || [];
+        highlightId = parsed.highlight || null;
+    }
+} catch (e) {
     document.getElementById('count-badge').textContent = 'Ошибка данных';
-  }
+}
 
   ymaps.ready(function () {
     if (!props.length) {
